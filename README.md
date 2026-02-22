@@ -6,8 +6,8 @@ Offline table-name redaction for SQL and Databricks PySpark before sending code 
 
 Analysts often use LLMs for SQL/PySpark debugging and optimisation, but it is not advisable to share real table names and locations.
 This tool replaces table references with placeholders (for example `redacted.Table_1`) and maps them back after LLM edits.
-Databricks built-in AI can do similar tasks, but this tool is useful if you prefer a different LLM or work in UDAL SSMS. 
-Unofficial note from the author (James H): the latest Databricks AI update stinks. 
+This is especially useful when scripts reference sensitive, restricted, or non-public datasets that should not be shared with external AI tools.
+It is useful if you prefer using your own LLM workflow instead of built-in AI assistants, ie Databricks.
 
 ## Run locally
 
@@ -83,3 +83,4 @@ Table redaction targets common DataFrame access/write calls:
 - `index.html` - structure and controls
 - `styles.css` - themes and layout
 - `app.js` - redaction/restore logic and UI behaviour
+# llm-script-redactor
