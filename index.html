@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Script Redactor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top-shell">
+        <div class="brand-row">
+          <div>
+            <h1>LLM Script Redactor</h1>
+            <p>
+              Offline table-name redaction for SQL and Databricks PySpark before sending code to an LLM.
+            </p>
+          </div>
+          <div class="brand-actions">
+            <button id="darkModeBtn" class="secondary" type="button">Dark mode</button>
+            <a href="README.md" target="_blank" rel="noopener" class="button-like readme-btn">Open README</a>
+          </div>
+        </div>
+        <div class="control-row">
+          <label for="scriptModeSelect">Script type</label>
+          <select id="scriptModeSelect" aria-label="Choose script type">
+            <option value="sql">SQL</option>
+            <option value="pyspark">Databricks PySpark</option>
+          </select>
+          <button id="demoToggleBtn" class="secondary" type="button">Demo data: Off</button>
+          <button id="clearBtn" class="danger" type="button">Clear Local Data</button>
+        </div>
+      </header>
+
+      <details id="tutorialPanel" class="panel tutorial-panel">
+        <summary>Quick Tutorial</summary>
+        <ol>
+          <li>Choose <strong>SQL</strong> or <strong>Databricks PySpark</strong> from Script type.</li>
+          <li>Optional: turn <strong>Demo data</strong> on, or paste your own script into box 1.</li>
+          <li>Click <strong>Generate AI-safe Script</strong> and copy box 2 output.</li>
+          <li>Send it to your LLM and paste LLM output into box 3.</li>
+          <li>Click <strong>Restore original table names</strong>, then copy from box 4.</li>
+        </ol>
+      </details>
+
+      <div class="workflow-grid">
+        <section class="panel">
+          <h2>1. Original Script</h2>
+          <div class="editor">
+            <div id="sourceSqlLines" class="line-gutter" aria-hidden="true"></div>
+            <textarea id="sourceSql" class="sql-input" spellcheck="false" placeholder="Paste your SQL script here..."></textarea>
+          </div>
+          <div class="actions">
+            <button id="redactBtn">Generate AI-safe Script</button>
+            <button id="autoFixBtn" class="secondary" type="button">Auto-fix SQL typos</button>
+            <button class="secondary expand-btn" data-target="sourceSql" type="button">Expand box</button>
+          </div>
+          <div id="typoSummary" class="typo-summary">No SQL typo warnings.</div>
+        </section>
+
+        <section class="panel">
+          <h2>2. AI-safe Script</h2>
+          <div class="editor">
+            <div id="redactedSqlLines" class="line-gutter" aria-hidden="true"></div>
+            <div id="redactedTokenBox" class="token-box" aria-label="AI-safe script output"></div>
+          </div>
+          <textarea id="redactedSql" class="sql-input hidden-storage" spellcheck="false" placeholder="Redacted script will appear here..."></textarea>
+          <div class="actions">
+            <button id="copyRedactedBtn" class="secondary">Copy AI-safe Script</button>
+            <button class="secondary expand-btn" data-target="redactedTokenBox" type="button">Expand box</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>3. LLM-edited Script</h2>
+          <div class="editor">
+            <div id="editedSqlLines" class="line-gutter" aria-hidden="true"></div>
+            <textarea id="editedSql" class="sql-input" spellcheck="false" placeholder="Paste your LLM output here..."></textarea>
+          </div>
+          <div class="actions">
+            <button id="restoreBtn">Restore original table names</button>
+            <button class="secondary expand-btn" data-target="editedSql" type="button">Expand box</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>4. Restored Script</h2>
+          <div class="editor">
+            <div id="restoredSqlLines" class="line-gutter" aria-hidden="true"></div>
+            <textarea id="restoredSql" class="sql-input" spellcheck="false" placeholder="Restored script will appear here..."></textarea>
+          </div>
+          <div class="actions">
+            <button id="copyRestoredBtn" class="secondary">Copy restored script</button>
+            <button class="secondary expand-btn" data-target="restoredSql" type="button">Expand box</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>Table Mapping</h2>
+        <div id="mappingSummary" class="mapping-summary">No mapping generated yet.</div>
+        <div class="actions">
+          <button id="exportMapBtn" class="secondary">Export Mapping JSON</button>
+          <label for="importMapInput" class="button-like secondary">Import Mapping JSON</label>
+          <input id="importMapInput" type="file" accept="application/json" />
+        </div>
+      </section>
+
+      <section class="panel note">
+        <h2>Notes</h2>
+        <ul>
+          <li>Designed for table-name redaction only. Column names are preserved.</li>
+          <li>Everything is local-only in your browser (`localStorage`) and never sent anywhere.</li>
+          <li>If the LLM changes only logic/calculations and keeps placeholders, restore remains reliable.</li>
+          <li>If placeholders are removed or rewritten, restoration will be partial.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
