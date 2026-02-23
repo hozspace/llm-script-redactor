@@ -111,6 +111,111 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     return true;
   }
 
+  function isQualifiedOrQuotedTableRef(ref) {
+    const trimmed = ref.trim();
+    if (!trimmed) return false;
+    if (trimmed.includes(".")) return true;
+    return /^[`"\[]/.test(trimmed);
+  }
+
+  function startsWithSqlClause(text) {
+    return /^(?:,|\)|;|WHERE\b|GROUP\s+BY\b|ORDER\s+BY\b|HAVING\b|JOIN\b|LEFT\b|RIGHT\b|INNER\b|FULL\b|CROSS\b|UNION\b|INTERSECT\b|EXCEPT\b|LIMIT\b|QUALIFY\b|WINDOW\b|SAMPLE\b|LATERAL\b|ON\b|USING\b|SET\b|VALUES\b)/i.test(
+      text
+    );
+  }
+
+  function hasLikelyAliasThenClause(text) {
+    const aliasMatch = /^(?:AS\s+)?([A-Za-z_][A-Za-z0-9_$#]*)\b/i.exec(text);
+    if (!aliasMatch) return false;
+    const afterAlias = text.slice(aliasMatch[0].length).trimStart();
+    if (!afterAlias) return true;
+    return startsWithSqlClause(afterAlias);
+  }
+
+  function shouldRedactSqlTableRef(tableRef, tail) {
+    if (!isLikelyTableRef(tableRef)) return false;
+    if (isQualifiedOrQuotedTableRef(tableRef)) return true;
+
+    const trimmedTail = tail.trimStart();
+    if (!trimmedTail) return true;
+    if (startsWithSqlClause(trimmedTail)) return true;
+    if (hasLikelyAliasThenClause(trimmedTail)) return true;
+    return false;
+  }
+
+  function buildSqlProtectedMask(sql) {
+    const mask = new Uint8Array(sql.length);
+    let i = 0;
+    let mode = "none";
+
+    while (i < sql.length) {
+      const ch = sql[i];
+      const next = sql[i + 1];
+
+      if (mode === "none") {
+        if (ch === "-" && next === "-") {
+          mask[i] = 1;
+          i += 1;
+          mask[i] = 1;
+          mode = "lineComment";
+        } else if (ch === "/" && next === "*") {
+          mask[i] = 1;
+          i += 1;
+          mask[i] = 1;
+          mode = "blockComment";
+        } else if (ch === "'") {
+          mask[i] = 1;
+          mode = "singleQuote";
+        } else if (ch === '"') {
+          mask[i] = 1;
+          mode = "doubleQuote";
+        } else if (ch === "`") {
+          mask[i] = 1;
+          mode = "backtick";
+        } else if (ch === "[") {
+          mask[i] = 1;
+          mode = "bracket";
+        }
+        i += 1;
+        continue;
+      }
+
+      mask[i] = 1;
+
+      if (mode === "lineComment") {
+        if (ch === "\n") mode = "none";
+      } else if (mode === "blockComment") {
+        if (ch === "*" && next === "/") {
+          i += 1;
+          mask[i] = 1;
+          mode = "none";
+        }
+      } else if (mode === "singleQuote") {
+        if (ch === "'" && next === "'") {
+          i += 1;
+          mask[i] = 1;
+        } else if (ch === "'") {
+          mode = "none";
+        }
+      } else if (mode === "doubleQuote") {
+        if (ch === '"' && next === '"') {
+          i += 1;
+          mask[i] = 1;
+        } else if (ch === '"') {
+          mode = "none";
+        }
+      } else if (mode === "backtick") {
+        if (ch === "`") mode = "none";
+      } else if (mode === "bracket") {
+        if (ch === "]") mode = "none";
+      }
+
+      i += 1;
+    }
+
+    return mask;
+  }
+
   function isLikelyPySparkTableRef(ref) {
     const trimmed = ref.trim();
     if (!trimmed) return false;
@@ -129,14 +234,19 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     const byCanonical = {};
     const mapping = {};
     const nextPlaceholder = nextPlaceholderFactory();
+    const protectedMask = buildSqlProtectedMask(sql);
 
     const redacted = sql.replace(TABLE_REF_REGEX, (fullMatch, ws, tableRef, offset, fullSource) => {
+      if (protectedMask[offset]) {
+        return fullMatch;
+      }
+
       const tail = fullSource.slice(offset + fullMatch.length).trimStart();
       if (/^import\b/i.test(tail)) {
         return fullMatch;
       }
 
-      if (!isLikelyTableRef(tableRef)) {
+      if (!shouldRedactSqlTableRef(tableRef, tail)) {
         return fullMatch;
       }
 
