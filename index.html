@@ -27,6 +27,10 @@
             <option value="sql">SQL</option>
             <option value="pyspark">Databricks PySpark</option>
           </select>
+          <label class="toggle-inline" for="redactColumnsToggle">
+            <input id="redactColumnsToggle" type="checkbox" />
+            Redact column refs (SQL optional)
+          </label>
           <button id="demoToggleBtn" class="secondary" type="button">Demo data: Off</button>
           <button id="clearBtn" class="danger" type="button">Clear Local Data</button>
         </div>
@@ -96,25 +100,25 @@
         </section>
       </div>
 
-      <section class="panel">
-        <h2>Table Mapping</h2>
+      <section class="panel note">
+        <h2>Notes</h2>
+        <ul>
+          <li>Table redaction is always on. Optional SQL-only column redaction can be enabled above.</li>
+          <li>Everything is local-only in your browser (`localStorage`) and never sent anywhere.</li>
+          <li>If the LLM changes only logic/calculations and keeps placeholders, restore remains reliable.</li>
+          <li>If placeholders are removed or rewritten, restoration will be partial.</li>
+        </ul>
+      </section>
+
+      <details class="panel mapping-panel">
+        <summary>Table Mapping (Optional)</summary>
         <div id="mappingSummary" class="mapping-summary">No mapping generated yet.</div>
         <div class="actions">
           <button id="exportMapBtn" class="secondary">Export Mapping JSON</button>
           <label for="importMapInput" class="button-like secondary">Import Mapping JSON</label>
           <input id="importMapInput" type="file" accept="application/json" />
         </div>
-      </section>
-
-      <section class="panel note">
-        <h2>Notes</h2>
-        <ul>
-          <li>Designed for table-name redaction only. Column names are preserved.</li>
-          <li>Everything is local-only in your browser (`localStorage`) and never sent anywhere.</li>
-          <li>If the LLM changes only logic/calculations and keeps placeholders, restore remains reliable.</li>
-          <li>If placeholders are removed or rewritten, restoration will be partial.</li>
-        </ul>
-      </section>
+      </details>
     </main>
 
     <script src="app.js"></script>

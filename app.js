@@ -8,6 +8,7 @@
   const typoSummaryEl = document.getElementById("typoSummary");
   const importMapInputEl = document.getElementById("importMapInput");
   const scriptModeSelectEl = document.getElementById("scriptModeSelect");
+  const redactColumnsToggleEl = document.getElementById("redactColumnsToggle");
   const demoToggleBtnEl = document.getElementById("demoToggleBtn");
   const darkModeBtnEl = document.getElementById("darkModeBtn");
   const expandButtons = [...document.querySelectorAll(".expand-btn")];
@@ -36,7 +37,8 @@
   let ui = {
     scriptMode: DEFAULT_SCRIPT_MODE,
     darkMode: false,
-    demoMode: false
+    demoMode: false,
+    redactColumns: false
   };
   const SQL_DEMO_SCRIPT = `SELECT
   f.EpisodeOfCareId,
@@ -76,6 +78,7 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     String.raw`\b(?:${KEYWORD_PATTERN})\b(\s+)(?:ONLY\s+)?(${QUALIFIED})`,
     "gi"
   );
+  const COLUMN_REF_REGEX = new RegExp(String.raw`(${IDENTIFIER})\s*\.\s*(${IDENTIFIER})`, "g");
   const SQL_TYPO_CHECKS = [
     { regex: /\bFROMM\b/gi, fix: "FROM" },
     { regex: /\bFRMO\b/gi, fix: "FROM" },
@@ -100,6 +103,10 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
   ];
 
   function canonicalTableRef(raw) {
+    return raw.replace(/\s+/g, "").toLowerCase();
+  }
+
+  function canonicalColumnRef(raw) {
     return raw.replace(/\s+/g, "").toLowerCase();
   }
 
@@ -230,7 +237,62 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     return () => `redacted.Table_${counter++}`;
   }
 
-  function redactSql(sql) {
+  function nextColumnPlaceholderFactory() {
+    let counter = 1;
+    return () => `redacted.Col_${counter++}`;
+  }
+
+  function isLikelyTableContextBefore(sql, offset) {
+    const lookbehind = sql.slice(Math.max(0, offset - 48), offset);
+    return /\b(?:FROM|JOIN|UPDATE|INTO|TABLE|ONLY|MERGE\s+INTO|DELETE\s+FROM|TRUNCATE\s+TABLE)\s*$/i.test(
+      lookbehind
+    );
+  }
+
+  function stripIdentifierQuotes(identifier) {
+    const trimmed = identifier.trim();
+    if (
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      return trimmed.slice(1, -1);
+    }
+    return trimmed;
+  }
+
+  function isRedactedNamespace(identifier) {
+    return stripIdentifierQuotes(identifier).toLowerCase() === "redacted";
+  }
+
+  function redactSqlColumns(sql) {
+    const byCanonical = {};
+    const mapping = {};
+    const nextPlaceholder = nextColumnPlaceholderFactory();
+    const protectedMask = buildSqlProtectedMask(sql);
+
+    const redacted = sql.replace(COLUMN_REF_REGEX, (fullMatch, left, right, offset, fullSource) => {
+      if (protectedMask[offset]) return fullMatch;
+      if (isLikelyTableContextBefore(fullSource, offset)) return fullMatch;
+      if (isRedactedNamespace(left)) return fullMatch;
+      if (/^Table_\d+$/i.test(stripIdentifierQuotes(right))) return fullMatch;
+      if (/^Col_\d+$/i.test(stripIdentifierQuotes(right))) return fullMatch;
+
+      const columnRef = `${left.trim()}.${right.trim()}`;
+      const key = canonicalColumnRef(columnRef);
+      let placeholder = byCanonical[key];
+      if (!placeholder) {
+        placeholder = nextPlaceholder();
+        byCanonical[key] = placeholder;
+        mapping[placeholder] = columnRef;
+      }
+      return placeholder;
+    });
+
+    return { redacted, mapping };
+  }
+
+  function redactSql(sql, options = {}) {
     const byCanonical = {};
     const mapping = {};
     const nextPlaceholder = nextPlaceholderFactory();
@@ -262,7 +324,12 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
       return fullMatch.replace(tableRef, placeholder);
     });
 
-    return { redacted, mapping };
+    if (!options.redactColumns) {
+      return { redacted, mapping };
+    }
+
+    const { redacted: columnRedacted, mapping: columnMapping } = redactSqlColumns(redacted);
+    return { redacted: columnRedacted, mapping: { ...mapping, ...columnMapping } };
   }
 
   function redactPySparkScript(script) {
@@ -297,11 +364,11 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     return pysparkHints.test(source) ? "pyspark" : "sql";
   }
 
-  function redactByMode(source, mode) {
+  function redactByMode(source, mode, options = {}) {
     if (mode === "pyspark") {
       return redactPySparkScript(source);
     }
-    return redactSql(source);
+    return redactSql(source, options);
   }
 
   function detectCommonSqlTypos(source) {
@@ -399,10 +466,10 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
       return;
     }
 
-    const tokenPattern = /(redacted\.Table_\d+)/gi;
+    const tokenPattern = /(redacted\.(?:Table|Col)_\d+)/gi;
     const parts = text.split(tokenPattern);
     const htmlParts = parts.map((part) => {
-      if (/^redacted\.Table_\d+$/i.test(part)) {
+      if (/^redacted\.(?:Table|Col)_\d+$/i.test(part)) {
         const original = currentMapping[part] || currentMapping[part.toLowerCase()] || "No mapping found";
         const tooltip = `Original: ${original}`;
         return `<span class="redacted-token" data-original="${escapeHtml(tooltip)}">${escapeHtml(part)}</span>`;
@@ -443,7 +510,8 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
               ? state.ui.scriptMode
               : DEFAULT_SCRIPT_MODE,
           darkMode: Boolean(state.ui.darkMode),
-          demoMode: Boolean(state.ui.demoMode)
+          demoMode: Boolean(state.ui.demoMode),
+          redactColumns: Boolean(state.ui.redactColumns)
         };
       }
     } catch (err) {
@@ -531,6 +599,8 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
   function applyUiTheme() {
     document.body.dataset.mode = ui.darkMode ? "dark" : "light";
     scriptModeSelectEl.value = ui.scriptMode || DEFAULT_SCRIPT_MODE;
+    redactColumnsToggleEl.checked = Boolean(ui.redactColumns);
+    redactColumnsToggleEl.disabled = ui.scriptMode !== "sql";
     darkModeBtnEl.textContent = ui.darkMode ? "Light mode" : "Dark mode";
     demoToggleBtnEl.textContent = ui.demoMode ? "Demo data: On" : "Demo data: Off";
   }
@@ -616,7 +686,9 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
       }
     }
 
-    const { redacted, mapping } = redactByMode(source, activeMode);
+    const { redacted, mapping } = redactByMode(source, activeMode, {
+      redactColumns: activeMode === "sql" && ui.redactColumns
+    });
     currentMapping = mapping;
     redactedSqlEl.value = redacted;
     renderRedactedPreview();
@@ -635,7 +707,7 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     }
 
     if (!Object.keys(currentMapping).length) {
-      alert("No table mapping available. Generate or import a mapping first.");
+      alert("No mapping available. Generate or import a mapping first.");
       return;
     }
 
@@ -663,7 +735,8 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     ui = {
       scriptMode: DEFAULT_SCRIPT_MODE,
       darkMode: false,
-      demoMode: false
+      demoMode: false,
+      redactColumns: false
     };
     renderMappingSummary(currentMapping);
     renderTypoSummary(currentSqlTypoFindings);
@@ -694,7 +767,7 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
 
       const cleaned = {};
       for (const [k, v] of Object.entries(parsed)) {
-        if (!/^redacted\.Table_\d+$/i.test(k) || typeof v !== "string" || !v.trim()) {
+        if (!/^redacted\.(?:Table|Col)_\d+$/i.test(k) || typeof v !== "string" || !v.trim()) {
           continue;
         }
         cleaned[k] = v;
@@ -729,6 +802,11 @@ result_df.write.mode("overwrite").saveAsTable("demo_catalog.demo_mart.fake_episo
     if (ui.demoMode) {
       applyDemoScript();
     }
+    saveState();
+  });
+
+  redactColumnsToggleEl.addEventListener("change", () => {
+    ui.redactColumns = Boolean(redactColumnsToggleEl.checked);
     saveState();
   });
 
